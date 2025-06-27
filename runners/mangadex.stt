@@ -499,7 +499,7 @@ exports.info = {
     name: "MangaDex",
     id: "org.mangadex",
     version: 1.82,
-    website: "https://mangadex.org",
+    website: "https://sebzzzzzzzzzzzzzzzz.github.io/runners/assets/https://mangadex.org",
     supportedLanguages: utils_1.languages.map((v) => v.languageCode.includes("-")
         ? v.languageCode
         : v.languageCode + "-" + v.regionCode),
