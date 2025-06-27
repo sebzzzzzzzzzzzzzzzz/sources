@@ -198,7 +198,7 @@ exports.info = {
     version: 0.2,
     website: exports.HOST_URL,
     supportedLanguages: ["en"],
-    thumbnail: "mangafire.png",
+    thumbnail: "https://sebzzzzzzzzzzzzzzzz.github.io/runners/assets/mangafire.png",
     minSupportedAppVersion: "6.0.0",
 };
 // MangaFire Builder Instance
