@@ -206,7 +206,7 @@ exports.HOST_URL = "https://zonatmo.com";
 exports.info = {
     name: "ZonaTMO",
     id: "zonatmo_com",
-    version: 0.1,
+    version: 0.2,
     website: exports.HOST_URL,
     supportedLanguages: ["es"],
     thumbnail: "zonatmo.png",
@@ -300,12 +300,24 @@ class ZonaTMOSource extends tachiyomi_1.TachiParsedHttpSource {
         let chapterId = "";
         const chapterList = el.find(".chapter-list");
         if (chapterList.length > 0) {
-            const firstUploadLink = chapterList.find("a[href*='view_uploads']").first();
-            const href = firstUploadLink.attr("href");
-            if (href) {
-                const match = href.match(/\/view_uploads\/(\d+)/);
-                if (match) {
-                    chapterId = match[1];
+            const viewerLink = chapterList.find("a[href*='/viewer/']").first();
+            if (viewerLink.length > 0) {
+                const href = viewerLink.attr("href");
+                if (href) {
+                    const match = href.match(/\/viewer\/([a-f0-9]+)/);
+                    if (match) {
+                        chapterId = match[1];
+                    }
+                }
+            }
+            if (!chapterId) {
+                const firstUploadLink = chapterList.find("a[href*='view_uploads']").first();
+                const href = firstUploadLink.attr("href");
+                if (href) {
+                    const match = href.match(/\/view_uploads\/(\d+)/);
+                    if (match) {
+                        chapterId = match[1];
+                    }
                 }
             }
         }
@@ -498,50 +510,33 @@ class ZonaTMOSource extends tachiyomi_1.TachiParsedHttpSource {
         const response = await this.client.get(`${this.baseUrl}/view_uploads/${chapter}`);
         let html = response.data;
         let $ = (0, cheerio_1.load)(html);
-        if ($('img.viewer-img').length > 0) {
-            const pages = [];
-            $('img.viewer-img').each((_, el) => {
-                const imgSrc = $(el).attr("data-src");
-                if (imgSrc) {
-                    pages.push({ url: imgSrc });
-                }
-            });
-            if (pages.length === 0) {
-                $('img[data-src]').each((_, el) => {
-                    const imgSrc = $(el).attr("data-src");
-                    if (imgSrc && imgSrc.includes('imgtmo.com')) {
-                        pages.push({ url: imgSrc });
-                    }
-                });
-            }
-            if (pages.length === 0) {
-                throw new Error(`No images found in viewer for chapter ${chapter}`);
-            }
-            return { pages };
-        }
-        const viewerUrl = $('meta[property="og:url"]').attr("content");
+        let viewerUrl = $('meta[property="og:url"]').attr("content");
         if (!viewerUrl) {
-            throw new Error(`Could not find viewer URL for chapter ${chapter}`);
+            const viewerLink = $('a[href*="/viewer/"]').first();
+            if (viewerLink.length > 0) {
+                viewerUrl = viewerLink.attr("href");
+                if (viewerUrl && !viewerUrl.startsWith('http')) {
+                    viewerUrl = this.baseUrl + viewerUrl;
+                }
+            }
+        }
+        if (viewerUrl) {
+            viewerUrl = viewerUrl.replace(/\/(paginated|cascade)(\?.*)?$/, '/cascade');
+        }
+        else {
+            viewerUrl = `${this.baseUrl}/viewer/${chapter}/cascade`;
         }
         const { data: viewerHtml } = await this.client.get(viewerUrl);
         const $viewer = (0, cheerio_1.load)(viewerHtml);
         const pages = [];
         $viewer('img.viewer-img').each((_, el) => {
             const imgSrc = $viewer(el).attr("data-src");
-            if (imgSrc) {
+            if (imgSrc && imgSrc.includes('imgtmo.com')) {
                 pages.push({ url: imgSrc });
             }
         });
         if (pages.length === 0) {
-            $viewer('img[data-src]').each((_, el) => {
-                const imgSrc = $viewer(el).attr("data-src");
-                if (imgSrc && imgSrc.includes('imgtmo.com')) {
-                    pages.push({ url: imgSrc });
-                }
-            });
-        }
-        if (pages.length === 0) {
-            throw new Error(`No images found in viewer for chapter ${chapter}`);
+            throw new Error(`No images found in viewer for chapter ${chapter}. Viewer URL: ${viewerUrl}`);
         }
         return { pages };
     }
