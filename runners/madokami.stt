@@ -138,7 +138,7 @@ exports.HOST_URL = "https://manga.madokami.al";
 exports.info = {
     name: "Madokami",
     id: "madokami",
-    version: 0.2,
+    version: 0.3,
     website: exports.HOST_URL,
     supportedLanguages: ["en"],
     thumbnail: "madokami.png",
