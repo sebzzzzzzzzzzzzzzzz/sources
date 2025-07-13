@@ -62,60 +62,51 @@ const cheerio_1 = require("cheerio");
 const daisuke_1 = require("@suwatte/daisuke");
 const getHomepage = async (source) => {
     const recentManga = [];
-    try {
-        const url = `${source.baseUrl}/recent`;
-        const { data: html } = await source.client.get(url);
-        const $ = (0, cheerio_1.load)(html);
-        $("table.mobile-files-table tbody tr td:nth-child(1) a:not([rel='nofollow'])").each((_, el) => {
-            const element = $(el);
-            const href = element.attr("href") ?? "";
-            const pathSegments = href.split("/");
-            let i = pathSegments.length;
-            const description = decodeURIComponent(pathSegments[i - 1]);
-            do {
-                i--;
-            } while (i > 0 && decodeURIComponent(pathSegments[i]).startsWith("!"));
-            const title = decodeURIComponent(pathSegments[i]);
-            if (href && title) {
-                recentManga.push({ id: href, title, cover: "" });
-            }
-        });
-        const mangaWithCovers = await Promise.all(recentManga.slice(0, 20).map(async (manga) => {
-            try {
-                const mangaUrl = `${source.baseUrl}${manga.id}`;
-                const { data: mangaHtml } = await source.client.get(mangaUrl);
-                const $manga = (0, cheerio_1.load)(mangaHtml);
-                const cover = $manga("img[itemprop='image']").attr("src") ?? "";
-                return {
-                    ...manga,
-                    cover: cover,
-                };
-            }
-            catch (error) {
-                console.error(`Error fetching cover for ${manga.title}:`, error);
-                return manga;
-            }
-        }));
-        return [
-            {
-                id: "recent",
-                title: "Recent Manga",
-                items: mangaWithCovers,
-                style: daisuke_1.SectionStyle.STANDARD_GRID,
-            },
-        ];
-    }
-    catch (error) {
-        console.error("Error fetching Madokami homepage:", error);
-        return [
-            {
-                id: "recent",
-                title: "Recent Manga",
-                items: recentManga,
-                style: daisuke_1.SectionStyle.STANDARD_GRID,
-            },
-        ];
-    }
+    const url = `${source.baseUrl}/recent`;
+    const { data: html } = await source.client.get(url);
+    const $ = (0, cheerio_1.load)(html);
+    $("table.mobile-files-table tbody tr td:nth-child(1) a:not([rel='nofollow'])").each((_, el) => {
+        const element = $(el);
+        const href = element.attr("href") ?? "";
+        const pathSegments = href.split("/");
+        let i = pathSegments.length;
+        do {
+            i--;
+        } while (i > 0 && decodeURIComponent(pathSegments[i]).startsWith("!"));
+        const title = decodeURIComponent(pathSegments[i]);
+        if (href && title) {
+            recentManga.push({ id: href, title, cover: "" });
+        }
+    });
+    const mangaWithCovers = await Promise.all(recentManga.slice(0, 10).map(async (manga) => {
+        try {
+            const mangaUrl = `${source.baseUrl}${manga.id}`;
+            const { data: mangaHtml } = await source.client.get(mangaUrl);
+            const $manga = (0, cheerio_1.load)(mangaHtml);
+            // Use the same selector as mangaDetailsParse in template.ts
+            const cover = $manga("img[itemprop='image']").attr("src") ?? "";
+            // Ensure the cover URL is absolute if it exists
+            const absoluteCover = cover && !cover.startsWith("http")
+                ? (cover.startsWith("/") ? `${source.baseUrl}${cover}` : `${source.baseUrl}/${cover}`)
+                : cover;
+            return {
+                ...manga,
+                cover: absoluteCover
+            };
+        }
+        catch (error) {
+            console.error(`Error fetching cover for ${manga.title}:`, error);
+            return manga;
+        }
+    }));
+    return [
+        {
+            id: "recent",
+            title: "Recent Manga",
+            items: mangaWithCovers,
+            style: daisuke_1.SectionStyle.STANDARD_GRID,
+        },
+    ];
 };
 exports.getHomepage = getHomepage;
 
@@ -133,7 +124,7 @@ exports.HOST_URL = "https://manga.madokami.al";
 exports.info = {
     name: "Madokami",
     id: "madokami",
-    version: 0.1,
+    version: 0.2,
     website: exports.HOST_URL,
     supportedLanguages: ["en"],
     thumbnail: "madokami.png",
@@ -249,18 +240,22 @@ class MadokamiTemplate extends tachiyomi_1.TachiParsedHttpSource {
         return this.popularMangaFromElement(element);
     }
     latestUpdatesRequest(page) {
-        throw new Error("Latest updates not supported");
+        // Madokami doesn't support URL-based pagination, so we fetch all and slice
+        return {
+            url: `${this.baseUrl}/recent`,
+        };
     }
     latestUpdatesSelector() {
-        return "";
+        return "table.mobile-files-table tbody tr td:nth-child(1) a:not([rel='nofollow'])";
     }
     latestUpdatesFromElement(element) {
-        throw new Error("Latest updates not supported");
+        return this.popularMangaFromElement(element);
     }
     latestUpdatesNextPageSelector() {
         return "";
     }
     popularMangaRequest(page) {
+        // Madokami doesn't support URL-based pagination, so we fetch all and slice
         return {
             url: `${this.baseUrl}/recent`,
         };
@@ -272,7 +267,6 @@ class MadokamiTemplate extends tachiyomi_1.TachiParsedHttpSource {
         const href = element.attr("href") ?? "";
         const pathSegments = href.split("/");
         let i = pathSegments.length;
-        const description = decodeURIComponent(pathSegments[i - 1]);
         do {
             i--;
         } while (i > 0 && decodeURIComponent(pathSegments[i]).startsWith("!"));
@@ -280,7 +274,7 @@ class MadokamiTemplate extends tachiyomi_1.TachiParsedHttpSource {
         return {
             id: href,
             title: title,
-            cover: ""
+            cover: "" // Will be populated when manga details are fetched
         };
     }
     popularMangaNextPageSelector() {
@@ -412,6 +406,120 @@ class MadokamiTemplate extends tachiyomi_1.TachiParsedHttpSource {
     }
     async getSortOptions() {
         return [];
+    }
+    async getPopularManga(page) {
+        const request = this.popularMangaRequest(page);
+        const { data: response } = await this.client.request(request);
+        const initialResult = this.parsePopularManga(response);
+        // Calculate pagination slice (20 items per page)
+        const itemsPerPage = 20;
+        const startIndex = (page - 1) * itemsPerPage;
+        const endIndex = startIndex + itemsPerPage;
+        const pageResults = initialResult.results.slice(startIndex, endIndex);
+        // Fetch covers for the current page results
+        const mangaWithCovers = await Promise.all(pageResults.map(async (manga) => {
+            try {
+                const mangaUrl = `${this.baseUrl}${manga.id}`;
+                const { data: mangaHtml } = await this.client.get(mangaUrl);
+                const $manga = (0, cheerio_1.load)(mangaHtml);
+                // Use the same selector as mangaDetailsParse
+                const cover = $manga("img[itemprop='image']").attr("src") ?? "";
+                // Ensure the cover URL is absolute if it exists
+                const absoluteCover = cover && !cover.startsWith("http")
+                    ? (cover.startsWith("/") ? `${this.baseUrl}${cover}` : `${this.baseUrl}/${cover}`)
+                    : cover;
+                return {
+                    ...manga,
+                    cover: absoluteCover
+                };
+            }
+            catch (error) {
+                console.error(`Error fetching cover for ${manga.title}:`, error);
+                return manga;
+            }
+        }));
+        // Check if there are more pages
+        const isLastPage = endIndex >= initialResult.results.length;
+        return {
+            results: mangaWithCovers,
+            isLastPage
+        };
+    }
+    async getLatestManga(page) {
+        const request = this.latestUpdatesRequest(page);
+        const { data: response } = await this.client.request(request);
+        const initialResult = this.parseLatestManga(response);
+        // Calculate pagination slice (20 items per page)
+        const itemsPerPage = 20;
+        const startIndex = (page - 1) * itemsPerPage;
+        const endIndex = startIndex + itemsPerPage;
+        const pageResults = initialResult.results.slice(startIndex, endIndex);
+        // Fetch covers for the current page results
+        const mangaWithCovers = await Promise.all(pageResults.map(async (manga) => {
+            try {
+                const mangaUrl = `${this.baseUrl}${manga.id}`;
+                const { data: mangaHtml } = await this.client.get(mangaUrl);
+                const $manga = (0, cheerio_1.load)(mangaHtml);
+                // Use the same selector as mangaDetailsParse
+                const cover = $manga("img[itemprop='image']").attr("src") ?? "";
+                // Ensure the cover URL is absolute if it exists
+                const absoluteCover = cover && !cover.startsWith("http")
+                    ? (cover.startsWith("/") ? `${this.baseUrl}${cover}` : `${this.baseUrl}/${cover}`)
+                    : cover;
+                return {
+                    ...manga,
+                    cover: absoluteCover
+                };
+            }
+            catch (error) {
+                console.error(`Error fetching cover for ${manga.title}:`, error);
+                return manga;
+            }
+        }));
+        // Check if there are more pages
+        const isLastPage = endIndex >= initialResult.results.length;
+        return {
+            results: mangaWithCovers,
+            isLastPage
+        };
+    }
+    async getSearchManga(searchRequest) {
+        const request = this.searchMangaRequest(searchRequest);
+        const { data: response } = await this.client.request(request);
+        const initialResult = this.parseSearchManga(response, searchRequest);
+        // Calculate pagination slice (20 items per page)
+        const itemsPerPage = 20;
+        const startIndex = (searchRequest.page - 1) * itemsPerPage;
+        const endIndex = startIndex + itemsPerPage;
+        const pageResults = initialResult.results.slice(startIndex, endIndex);
+        // Fetch covers for the current page results
+        const mangaWithCovers = await Promise.all(pageResults.map(async (manga) => {
+            try {
+                const mangaUrl = `${this.baseUrl}${manga.id}`;
+                const { data: mangaHtml } = await this.client.get(mangaUrl);
+                const $manga = (0, cheerio_1.load)(mangaHtml);
+                // Use the same selector as mangaDetailsParse
+                const cover = $manga("img[itemprop='image']").attr("src") ?? "";
+                // Ensure the cover URL is absolute if it exists
+                const absoluteCover = cover && !cover.startsWith("http")
+                    ? (cover.startsWith("/") ? `${this.baseUrl}${cover}` : `${this.baseUrl}/${cover}`)
+                    : cover;
+                return {
+                    ...manga,
+                    cover: absoluteCover
+                };
+            }
+            catch (error) {
+                console.error(`Error fetching cover for ${manga.title}:`, error);
+                return manga;
+            }
+        }));
+        // Check if there are more pages
+        const isLastPage = endIndex >= initialResult.results.length;
+        return {
+            results: mangaWithCovers,
+            isLastPage
+        };
     }
 }
 exports.MadokamiTemplate = MadokamiTemplate;
