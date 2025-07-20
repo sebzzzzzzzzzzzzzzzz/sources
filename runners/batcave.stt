@@ -5,25 +5,29 @@ exports.getHomepage = void 0;
 const cheerio_1 = require("cheerio");
 const daisuke_1 = require("@suwatte/daisuke");
 const getHomepage = async (source) => {
-    const popularManga = [];
-    const url = `https://mangaokutr.com/`;
+    const comics = [];
+    const url = `https://batcave.biz/`;
     const { data: html } = await source.client.get(url);
     const $ = (0, cheerio_1.load)(html);
-    $(".bsx").each((_, el) => {
+    $("a.poster.grid-item.has-overlay").each((_, el) => {
         const element = $(el);
-        const link = element.find("a").first();
-        // Use the same ID parsing as your template
-        const id = link.attr("href")?.split("/manga/")[1]?.split("/")[0] ?? "";
-        const title = link.attr("title") || link.text().trim();
-        // Use data-src for lazy-loaded images, fallback to src
-        const cover = (link.find("img").attr("data-src") || link.find("img").attr("src")) ?? "";
-        popularManga.push({ id, title, cover });
+        const href = element.attr("href") || "";
+        // Extract id from URL, e.g. /33534-superman-unlimited-2025.html => 33534-superman-unlimited-2025
+        const idMatch = href.match(/\/([\d]+-[^/]+)\.html/);
+        const id = idMatch ? idMatch[1] : href;
+        const title = element.find(".poster__title").text().trim() || element.attr("title") || element.text().trim();
+        let cover = element.find("img").attr("data-src") || element.find("img").attr("src") || "";
+        if (cover.startsWith("/"))
+            cover = `https://batcave.biz${cover}`;
+        if (id && title && cover) {
+            comics.push({ id, title, cover });
+        }
     });
     return [
         {
-            id: "Latest",
-            title: "Latest Manga",
-            items: popularManga,
+            id: "latest",
+            title: "Latest Comics",
+            items: comics,
             style: daisuke_1.SectionStyle.STANDARD_GRID,
         },
     ];
@@ -38,21 +42,19 @@ const daisuke_1 = require("@suwatte/daisuke");
 const tachiyomi_1 = require("../../template/tachiyomi");
 const template_1 = require("./template");
 const homepage_1 = require("./homepage");
-exports.HOST_URL = "https://mangaokutr.com";
+exports.HOST_URL = "https://batcave.biz";
 exports.info = {
-    name: "Manga Oku TR",
-    id: "mangaokutr",
+    name: "BatCave",
+    id: "batcave_biz",
     version: 0.1,
     website: exports.HOST_URL,
-    supportedLanguages: ["TR"],
-    thumbnail: "mangaokutr.png",
+    supportedLanguages: ["en"],
+    thumbnail: "batcave.png",
     minSupportedAppVersion: "6.0.0",
-    rating: daisuke_1.CatalogRating.SAFE,
+    rating: daisuke_1.CatalogRating.MIXED,
 };
-// Builder for MangaOkuTR
-const builder = new tachiyomi_1.TachiBuilder(exports.info, template_1.MangaOkuTRSource);
-// Homepage Section Resolver
-const MangaOkuTRPageResolver = {
+const builder = new tachiyomi_1.TachiBuilder(exports.info, template_1.BatCaveSource);
+const BatCavePageResolver = {
     async getSectionsForPage(link) {
         if (link.id !== "home")
             throw new Error("page not found.");
@@ -64,22 +66,17 @@ const MangaOkuTRPageResolver = {
         throw new Error("resolvePageSection is intentionally unimplemented.");
     },
 };
-const MangaOkuTRImageInterceptor = {
+const BatCaveImageInterceptor = {
     async willRequestImage(imageURL) {
-        return {
-            url: imageURL,
-            headers: {
-                Referer: exports.HOST_URL,
-                "User-Agent": "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:139.0) Gecko/20100101 Firefox/139.0",
-                Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
-                "Accept-Encoding": "gzip, deflate, br",
-                "Cache-Control": "no-cache",
-                "Pragma": "no-cache",
-                "Sec-Fetch-Dest": "image",
-                "Sec-Fetch-Mode": "no-cors",
-                "Sec-Fetch-Site": "cross-site",
-            },
-        };
+        if (imageURL.includes("batcave.biz")) {
+            return {
+                url: imageURL,
+                headers: {
+                    Referer: exports.HOST_URL,
+                },
+            };
+        }
+        return { url: imageURL };
     },
 };
 exports.Target = {
@@ -90,67 +87,108 @@ exports.Target = {
     getChapterData: builder.getChapterData.bind(builder),
     getDirectory: builder.getDirectory.bind(builder),
     getDirectoryConfig: builder.getDirectoryConfig.bind(builder),
-    ...MangaOkuTRPageResolver,
-    ...MangaOkuTRImageInterceptor,
+    ...BatCavePageResolver,
+    ...BatCaveImageInterceptor,
 };
 
 },{"../../template/tachiyomi":6,"./homepage":1,"./template":3,"@suwatte/daisuke":12}],3:[function(require,module,exports){
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.MangaOkuTRSource = void 0;
+exports.BatCaveSource = void 0;
 const daisuke_1 = require("@suwatte/daisuke");
 const cheerio_1 = require("cheerio");
 const tachiyomi_1 = require("../../template/tachiyomi");
-class MangaOkuTRSource extends tachiyomi_1.TachiParsedHttpSource {
-    name = "Manga Oku TR";
-    baseUrl = "https://mangaokutr.com";
-    lang = "tr";
+class BatCaveSource extends tachiyomi_1.TachiParsedHttpSource {
+    name = "BatCave";
+    baseUrl = "https://batcave.biz";
+    lang = "en";
     supportsLatest = true;
     chapterListSelector() {
-        return ".eplister li .eph-num a";
+        return ".chapters-list .chapter-item, .chapters-list li, .chapter-list li";
     }
     chapterFromElement(el) {
-        const link = el.attr("href") || "";
-        const title = el.find(".chapternum").text().trim();
-        const date = el.find(".chapterdate").text().trim();
+        const link = el.find("a");
+        const title = link.text().trim();
+        const chapterId = link.attr("href") || "";
         let number = 0;
-        const match = title.match(/Bölüm\s*([\d.]+)/i) || link.match(/bolum[\/\- ]?([\d.]+)/i);
+        // Fix: Move dash to end of character class to avoid "Range out of order" error
+        const match = title.match(/chapter\s*([\d.]+)/i) || chapterId.match(/chapter[\/\- ]?([\d.]+)/i);
         if (match)
             number = parseFloat(match[1]);
-        // Always use parseTurkishDate, fallback to new Date() only if it fails
-        let chapterDate = this.parseTurkishDate(date);
-        if (!chapterDate || isNaN(chapterDate.getTime()))
-            chapterDate = new Date();
-        return { chapterId: link.split("/").pop() || link, title, number, date: chapterDate };
+        const dateStr = el.find(".chapter-date").text().trim() || el.find("time").attr("datetime") || "";
+        const date = isNaN(Date.parse(dateStr)) ? new Date() : new Date(dateStr);
+        return { chapterId, title, number, date };
     }
     async getMangaChapters(slug) {
-        const request = { url: `${this.baseUrl}/manga/${slug}/` };
-        const { data: html } = await this.client.request(request);
+        const { data: html } = await this.client.get(`${this.baseUrl}/${slug}.html#chapters`);
+        // Try to extract chapters from window.__DATA__
+        const dataMatch = html.match(/window\.__DATA__\s*=\s*(\{.*?\});/s);
+        if (dataMatch) {
+            try {
+                const data = JSON.parse(dataMatch[1]);
+                if (data.chapters && Array.isArray(data.chapters)) {
+                    return data.chapters.map((ch, idx) => {
+                        let chapterId = `/reader/${data.news_id}/${ch.id}`;
+                        chapterId = `${this.baseUrl}${chapterId}`;
+                        let title = ch.title || ch.title_en || `Chapter ${ch.posi}`;
+                        if (ch.pages)
+                            title += ` (${ch.pages} pages)`;
+                        let number = ch.posi || idx + 1;
+                        const dateStr = ch.date || "";
+                        const date = isNaN(Date.parse(dateStr)) ? new Date() : new Date(dateStr);
+                        return this.generateChapter({ chapterId, title, number, date }, idx, "");
+                    });
+                }
+            }
+            catch (e) {
+                // fallback to cheerio below
+            }
+        }
+        // Fallback: parse from HTML as before
         const $ = (0, cheerio_1.load)(html);
-        const chapters = $(this.chapterListSelector())
-            .toArray()
-            .map((el, idx) => this.generateChapter(this.chapterFromElement($(el)), idx, "tr"));
-        return chapters;
+        return $(".comix__fullstory-chapters .cl__item").toArray().map((el, idx) => {
+            const el$ = $(el);
+            const link = el$.find(".cl__item-title a");
+            let chapterId = link.attr("href") || "";
+            if (chapterId.startsWith("/"))
+                chapterId = `${this.baseUrl}${chapterId}`;
+            let title = link.text().trim() || el$.attr("title") || "";
+            const pageCount = el$.find(".cl__item-pages").text().trim();
+            if (pageCount)
+                title += ` (${pageCount})`;
+            let number = 0;
+            const numText = el$.find(".cl__item-num").text().replace(/[^\d]/g, "");
+            if (numText)
+                number = parseInt(numText, 10);
+            const dateStr = el$.find(".cl__item-date").text().trim();
+            const date = isNaN(Date.parse(dateStr)) ? new Date() : new Date(dateStr);
+            return this.generateChapter({ chapterId, title, number, date }, idx, "");
+        });
     }
     parseIdFromUrl(url) {
-        return url.split("/manga/")[1]?.split("/")[0] ?? "";
+        // e.g. /33534-superman-unlimited-2025.html => 33534-superman-unlimited-2025
+        const match = url.match(/\/([\d]+\-[^\/]+)\.html/); // Dash escaped
+        return match ? match[1] : url;
     }
     parseHighlight(el) {
-        const link = el.find("a").first();
-        const id = this.parseIdFromUrl(link.attr("href") ?? "");
-        const title = el.find(".tt").text().trim();
-        // Use data-src for lazy-loaded images, fallback to src
-        const cover = (el.find("img").attr("data-src") || el.find("img").attr("src")) ?? "";
+        // For popular manga elements (a.poster.grid-item.has-overlay), the link is the element itself
+        const href = el.attr("href") || "";
+        const id = this.parseIdFromUrl(href);
+        // Title is in the overlay or title attribute
+        const title = el.attr("title") || el.find(".overlay-title").text().trim() || "";
+        // Cover image
+        let cover = el.find("img").attr("data-src") || el.find("img").attr("src") || "";
+        if (cover.startsWith("/"))
+            cover = `https://batcave.biz${cover}`;
         return { id, title, cover };
     }
     parseHighlightList($) {
-        return $(".bsx").toArray().map(el => this.parseHighlight($(el)));
+        return $("a.poster.grid-item.has-overlay").toArray().map(el => this.parseHighlight($(el)));
     }
     async fetchHighlights(path, maxPages = 3) {
         const results = [];
         for (let page = 1; page <= maxPages; page++) {
-            const request = { url: `${this.baseUrl}/${path}/page/${page}/` };
-            const { data: html } = await this.client.request(request);
+            const { data: html } = await this.client.get(`${this.baseUrl}/${path}?page=${page}`);
             results.push(...this.parseHighlightList((0, cheerio_1.load)(html)));
         }
         return results;
@@ -164,92 +202,118 @@ class MangaOkuTRSource extends tachiyomi_1.TachiParsedHttpSource {
     searchMangaRequest(request) {
         const page = request.page ?? 1;
         const query = request.query || "";
-        return {
-            url: `${this.baseUrl}/?s=${encodeURIComponent(query)}&page=${page}`
-        };
+        let url;
+        if (page === 1) {
+            url = `${this.baseUrl}/search/${encodeURIComponent(query)}`;
+        }
+        else {
+            url = `${this.baseUrl}/search/${encodeURIComponent(query)}/page/${page}/`;
+        }
+        return { url };
     }
     searchMangaSelector() {
-        return ".bsx";
+        // Updated selector for search results
+        return ".readed.d-flex.short";
     }
     searchMangaNextPageSelector() {
-        return ".pagination .next";
+        return ".pagination__pages a";
     }
     searchMangaFromElement(el) {
-        const link = el.find("a").first();
-        const id = this.parseIdFromUrl(link.attr("href") ?? "");
-        const title = link.find(".tt").text().trim();
-        // Use data-src for lazy-loaded images, fallback to src
-        const cover = (link.find("img").attr("data-src") || link.find("img").attr("src")) ?? "";
+        // Parse the id from the link
+        const link = el.find(".readed__title a");
+        const href = link.attr("href") || "";
+        // Extract id from URL (e.g. https://batcave.biz/33051-absolute-batman-2024.html)
+        const idMatch = href.match(/\/([\d]+-[^\/]+)\.html/);
+        const id = idMatch ? idMatch[1] : href;
+        // Title
+        const title = link.text().trim();
+        // Cover image
+        let cover = el.find(".readed__img img").attr("data-src") || el.find(".readed__img img").attr("src") || "";
+        if (cover.startsWith("/"))
+            cover = `https://batcave.biz${cover}`;
+        // Optionally parse extra fields for future use
+        const metaItems = el.find(".readed__meta-item");
+        const publisher = metaItems.eq(0).text().trim();
+        const year = metaItems.eq(1).text().trim();
+        const summary = el.find(".readed__info li").first().text().trim();
+        const lastIssue = el.find(".readed__info li span:contains('Last issue:')").parent().text().replace('Last issue:', '').trim();
+        // Only return Highlight for now
         return { id, title, cover };
     }
     searchMangaParse($) {
         return $(this.searchMangaSelector()).toArray().map(el => this.searchMangaFromElement($(el)));
     }
+    // Override parseSearchManga to ensure proper pagination detection
+    parseSearchManga(html, request) {
+        const $ = (0, cheerio_1.load)(html);
+        const results = $(this.searchMangaSelector())
+            .toArray()
+            .map((element) => this.searchMangaFromElement($(element)));
+        // Check if there are more pages by looking for pagination links
+        let isLastPage = true;
+        const selector = this.searchMangaNextPageSelector?.();
+        if (selector) {
+            // Check if there are any pagination links (excluding the current page which is a span)
+            const paginationLinks = $(selector);
+            isLastPage = paginationLinks.length === 0;
+        }
+        return {
+            results,
+            isLastPage,
+        };
+    }
     popularMangaRequest(page) {
-        return { url: `${this.baseUrl}/page/${page}/` };
+        return { url: `${this.baseUrl}/?page=${page}` };
     }
     popularMangaSelector() {
-        return ".bsx";
+        return "a.poster.grid-item.has-overlay";
     }
     popularMangaFromElement(el) {
         return this.parseHighlight(el);
     }
     popularMangaNextPageSelector() {
-        return this.searchMangaNextPageSelector();
+        return ".pagination__btn-loader a";
     }
     latestUpdatesRequest(page) {
-        return { url: `${this.baseUrl}/page/${page}/` };
+        return { url: `${this.baseUrl}/?page=${page}` };
     }
     latestUpdatesSelector() {
-        return ".bsx";
+        return "li.latest.grid-item.d-flex.ai-center";
     }
     latestUpdatesFromElement(el) {
-        return this.parseHighlight(el);
+        const link = el.find("a").first();
+        const href = link.attr("href") || "";
+        const id = this.parseIdFromUrl(href);
+        const title = el.find(".latest__title").text().trim();
+        let cover = el.find("img").attr("src") || "";
+        if (cover.startsWith("/"))
+            cover = `https://batcave.biz${cover}`;
+        return { id, title, cover };
     }
     latestUpdatesNextPageSelector() {
-        return this.searchMangaNextPageSelector();
+        return ".pagination__btn-loader a";
     }
     mangaDetailsRequest(slug) {
-        return { url: `${this.baseUrl}/manga/${slug}/` };
+        return { url: `${this.baseUrl}/${slug}.html` };
     }
     mangaDetailsParse($) {
-        const title = $(".entry-title").text().trim();
-        // Get cover from the main image element, not from anchor
-        const cover = $(".thumb img").attr("src") || $(".thumb img").attr("data-src") || "";
-        const summary = $(".chdesc p").text().trim();
-        let statusText = $(".tsinfo .imptdt")
-            .filter((_, el) => $(el).text().toLowerCase().includes("durum"))
-            .next()
-            .text()
-            .trim()
-            .toLowerCase();
+        const title = $(".comic-info__title, h1, .poster__title").first().text().trim();
+        // Cover: from .page__poster img or og:image
+        let cover = $(".page__poster img").attr("src") || $("meta[property='og:image']").attr("content") || "";
+        if (cover && cover.startsWith("/"))
+            cover = `${this.baseUrl}${cover}`;
+        // Summary: from .page__text or .comic-info__desc
+        const summary = $(".page__text, .comic-info__desc, .summary, .description, .site-desc, .site-desc p").first().text().trim();
+        // Genres: from .page__tags a
+        const genres = $(".page__tags a").toArray().map(el => $(el).text().trim()).filter(Boolean);
+        // Status: from .page__list or .comic-info__status
         let status = undefined;
-        if (statusText.includes("tamamlandı"))
-            status = daisuke_1.PublicationStatus.COMPLETED;
-        else if (statusText.includes("devam ediyor"))
+        const statusText = $(".page__list li:contains('Release type'), .comic-info__status, .status, .summary-status").text().toLowerCase();
+        if (statusText.includes("ongoing"))
             status = daisuke_1.PublicationStatus.ONGOING;
-        // Extract genres and determine reading mode
-        const genres = [];
-        $(".mgen a").each((_, el) => {
-            const genre = $(el).text().trim();
-            if (genre) {
-                genres.push({
-                    id: genre.toLowerCase().replace(/\s+/g, "_"),
-                    title: genre,
-                });
-            }
-        });
-        // Determine reading mode based on genres
-        let recommendedPanelMode = daisuke_1.ReadingMode.PAGED_MANGA;
-        const genreText = genres.map(g => g.title).join(" ").toLowerCase();
-        // Check for Turkish manga site specific genres
-        if (genreText.includes("manga")) {
-            recommendedPanelMode = daisuke_1.ReadingMode.PAGED_MANGA; // Japanese manga style
-        }
-        // Default to paged manga for everything else
-        else {
-            recommendedPanelMode = daisuke_1.ReadingMode.WEBTOON; // Default for Japanese manga
-        }
+        if (statusText.includes("completed"))
+            status = daisuke_1.PublicationStatus.COMPLETED;
+        let recommendedPanelMode = daisuke_1.ReadingMode.PAGED_COMIC;
         return {
             title,
             cover,
@@ -259,141 +323,40 @@ class MangaOkuTRSource extends tachiyomi_1.TachiParsedHttpSource {
         };
     }
     async getPageList(_, chapter) {
-        const url = chapter.startsWith("http")
-            ? chapter
-            : `${this.baseUrl}${chapter.startsWith("/") ? "" : "/"}${chapter}`;
-        const request = { url };
-        const { data: html } = await this.client.request(request);
+        const url = chapter.startsWith("http") ? chapter : `${this.baseUrl}${chapter.startsWith("/") ? "" : "/"}${chapter}`;
+        const { data: html } = await this.client.get(url);
         const $ = (0, cheerio_1.load)(html);
-        let pages = [];
-        // Primary: #readerarea noscript (parse its HTML as a new DOM)
-        const noscript = $("#readerarea noscript");
-        let noscriptImages = $();
-        if (noscript.length > 0) {
-            const $ns = (0, cheerio_1.load)(noscript.html() || "");
-            noscriptImages = $ns("img");
+        // Find the script containing __DATA__
+        const script = $('script').toArray().find(el => $(el).html()?.includes('__DATA__'));
+        if (!script) {
+            throw new Error("Could not find __DATA__ script tag");
         }
-        const noscriptImageUrls = noscriptImages
-            .map((_, el) => {
-            const $el = noscriptImages.eq(_);
-            const src = $el.attr("src")?.trim();
-            return src;
-        })
-            .get()
-            .filter((src) => !!src && /\.(jpe?g|png|webp)$/i.test(src))
-            .map(url => ({ url: decodeURIComponent(url) }));
-        if (noscriptImageUrls.length > 0) {
-            pages = noscriptImageUrls;
+        // Extract the JSON object inside the script
+        const scriptContent = $(script).html() || "";
+        const jsonMatch = scriptContent.match(/__DATA__\s*=\s*(\{.*\});?/s);
+        if (!jsonMatch) {
+            throw new Error("Could not extract JSON data from __DATA__ script");
         }
-        else {
-            // Secondary: .reading-content img
-            const readingContentImages = $(".reading-content img");
-            const readingContentUrls = readingContentImages
-                .map((_, el) => {
-                const $el = $(el);
-                const src = $el.attr("src")?.trim();
-                return src;
-            })
-                .get()
-                .filter((src) => !!src && /\.(jpe?g|png|webp)$/i.test(src))
-                .map(url => ({ url: decodeURIComponent(url) }));
-            if (readingContentUrls.length > 0) {
-                pages = readingContentUrls;
-            }
-            else {
-                // Fallback: Any img in #readerarea
-                const fallbackImages = $("#readerarea img");
-                const fallbackUrls = fallbackImages
-                    .map((_, el) => {
-                    const $el = $(el);
-                    const src = $el.attr("src")?.trim();
-                    return src;
-                })
-                    .get()
-                    .filter((src) => !!src && /\.(jpe?g|png|webp)$/i.test(src))
-                    .map(url => ({ url: decodeURIComponent(url) }));
-                pages = fallbackUrls;
-            }
+        const jsonText = jsonMatch[1];
+        let data;
+        try {
+            data = JSON.parse(jsonText);
         }
+        catch (e) {
+            throw new Error("Failed to parse JSON from __DATA__: " + e);
+        }
+        // data.images is the array of image URLs or relative paths
+        const pages = data.images.map((img, idx) => {
+            const url = img.startsWith("http") ? img.trim() : `${this.baseUrl}${img.startsWith("/") ? "" : "/"}${img.trim()}`;
+            return { url, index: idx };
+        });
         return { pages };
     }
-    pageListParse($) {
+    pageListParse() {
         throw new Error("Not implemented");
     }
-    async getFilterList() {
-        return [];
-    }
-    // Enhanced Turkish date parser
-    parseTurkishDate(dateStr) {
-        if (!dateStr)
-            return new Date();
-        dateStr = dateStr.trim();
-        // Relative: '2 gün önce', '1 saat önce', '3 dakika önce', 'Dün', 'Bugün'
-        if (/^(\d+)\s*gün önce$/i.test(dateStr)) {
-            const days = parseInt(dateStr.match(/(\d+)/)[1]);
-            const d = new Date();
-            d.setDate(d.getDate() - days);
-            return d;
-        }
-        if (/^(\d+)\s*saat önce$/i.test(dateStr)) {
-            const hours = parseInt(dateStr.match(/(\d+)/)[1]);
-            const d = new Date();
-            d.setHours(d.getHours() - hours);
-            return d;
-        }
-        if (/^(\d+)\s*dakika önce$/i.test(dateStr)) {
-            const mins = parseInt(dateStr.match(/(\d+)/)[1]);
-            const d = new Date();
-            d.setMinutes(d.getMinutes() - mins);
-            return d;
-        }
-        if (/^(\d+)\s*hafta önce$/i.test(dateStr)) {
-            const weeks = parseInt(dateStr.match(/(\d+)/)[1]);
-            const d = new Date();
-            d.setDate(d.getDate() - weeks * 7);
-            return d;
-        }
-        if (/^(\d+)\s*ay önce$/i.test(dateStr)) {
-            const months = parseInt(dateStr.match(/(\d+)/)[1]);
-            const d = new Date();
-            d.setMonth(d.getMonth() - months);
-            return d;
-        }
-        if (/^(\d+)\s*yıl önce$/i.test(dateStr)) {
-            const years = parseInt(dateStr.match(/(\d+)/)[1]);
-            const d = new Date();
-            d.setFullYear(d.getFullYear() - years);
-            return d;
-        }
-        if (/^Dün$/i.test(dateStr)) {
-            const d = new Date();
-            d.setDate(d.getDate() - 1);
-            return d;
-        }
-        if (/^Bugün$/i.test(dateStr)) {
-            return new Date();
-        }
-        // Absolute: 'Kasım 23, 2022'
-        const months = {
-            "Ocak": 0, "Şubat": 1, "Mart": 2, "Nisan": 3, "Mayıs": 4, "Haziran": 5,
-            "Temmuz": 6, "Ağustos": 7, "Eylül": 8, "Ekim": 9, "Kasım": 10, "Aralık": 11
-        };
-        const match = dateStr.match(/(\w+)\s+(\d+),\s+(\d+)/);
-        if (match) {
-            const [, month, day, year] = match;
-            const monthIndex = months[month];
-            if (monthIndex !== undefined) {
-                return new Date(parseInt(year), monthIndex, parseInt(day));
-            }
-        }
-        // Fallback: try Date.parse
-        const parsed = Date.parse(dateStr);
-        if (!isNaN(parsed))
-            return new Date(parsed);
-        return new Date();
-    }
 }
-exports.MangaOkuTRSource = MangaOkuTRSource;
+exports.BatCaveSource = BatCaveSource;
 
 },{"../../template/tachiyomi":6,"@suwatte/daisuke":12,"cheerio":undefined}],4:[function(require,module,exports){
 "use strict";
